@@ -15,10 +15,7 @@ connectDB();
 
 app.use(
   cors({
-    origin:
-      process.env.NODE_ENV === "development"
-        ? "http://localhost:5173"
-        : "https://vingo-frontend-ten.vercel.app",
+    origin: ["http://localhost:5173", "https://vingo-frontend-ten.vercel.app"],
     credentials: true,
   }),
 );
