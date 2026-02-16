@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
-const userSchema = new mongoose.Schema({
+const userSchema = new mongoose.Schema(
+  {
     fullName: {
       type: String,
       require: true,
@@ -31,8 +32,13 @@ const userSchema = new mongoose.Schema({
     otpExpires: {
       type: Date,
     },
+    location: {
+      type: { type: String, enum: ["Point"], default: "Point" },
+      coordinates: { type: [Number], default: [0, 0] },
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+userSchema.index({ location: "2dsphere" });
 
 export default mongoose.models.User || mongoose.model("User", userSchema);

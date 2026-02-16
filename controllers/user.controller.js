@@ -31,3 +31,25 @@ export async function getCurrentUser(req, res) {
     });
   }
 }
+
+export async function updateUserLocation(req, res) {
+  try {
+    const { lat, lon } = req.body;
+    const user = await userModel.findByIdAndUpdate(
+      req.userId,
+      {
+        location: {
+          type: "Point",
+          coordinates: [lon, lat],
+        },
+      },
+      { new: true },
+    );
+
+    return res.status(200).json({ message: `Location updated.` });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: `Error during updating user location : ${error}` });
+  }
+}

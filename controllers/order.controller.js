@@ -59,6 +59,12 @@ export async function placeOrder(req, res) {
       shopOrders,
     });
 
+    await newOrder.populate(
+      "shopOrders.shopOrderItems.item",
+      "name image price",
+    );
+    await newOrder.populate("shopOrders.shop", "name");
+
     return res.status(200).json(newOrder);
   } catch (error) {
     return res.status(500).json({ message: `Place order error : ${error}` });
@@ -91,12 +97,36 @@ export async function getMyOrders(req, res) {
         user: order.user,
         shopOrders: order.shopOrders.find((o) => o.owner._id == req.userId),
         createdAt: order.createdAt,
-        deliveryAddress: order.deliveryAddress
+        deliveryAddress: order.deliveryAddress,
       }));
 
       return res.status(200).json(filteredOrders);
     }
   } catch (error) {
     return res.status(500).json({ message: `Get order error : ${error}` });
+  }
+}
+
+// for updating status preparing/cod/pending
+export async function updateOrderStatus(req, res) {
+  try {
+    const { orderId, shopId } = req.params;
+    const { status } = req.body;
+
+    const order = await orderModel.findById(orderId);
+
+    const shopOrder = await order.shopOrders.find((o) => o.shop == shopId);
+    if (!shopOrder) {
+      return res.status(400).json({ message: `Shop order is not found` });
+    }
+    shopOrder.status = status;
+    await shopOrder.save();
+    await order.save();
+
+    return res.status(200).json(shopOrder);
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: `Updating Order Status error : ${error}` });
   }
 }
