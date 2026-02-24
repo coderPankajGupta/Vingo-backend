@@ -17,10 +17,19 @@ export async function sendMail(to, otp) {
     from: process.env.EMAIL,
     to,
     subject: "Verification OTP",
-    html: (
-      `<p>
+    html: `<p>
         This is verification otp by vingo. OTP : ${otp} OTP is valid for 5 min.
-      </p>`
-    ),
+      </p>`,
+  });
+}
+
+export async function sendDeliveryOtpMail(user, otp) {
+  await transporter.sendMail({
+    from: process.env.EMAIL,
+    to: user.email,
+    subject: "Delivery OTP",
+    html: `<p>
+        This is delivery otp by vingo. OTP : <b>${otp}</b>. It is valid for 5 min.
+      </p>`,
   });
 }

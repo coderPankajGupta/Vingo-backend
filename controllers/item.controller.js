@@ -117,7 +117,8 @@ export async function getItemByCity(req, res) {
     if (!city) {
       return res.status(400).json({ message: `City is required.` });
     }
-    const shops = await shopModel.find({
+    const shops = await shopModel
+      .find({
         city: { $regex: new RegExp(`^${city}$`, "i") },
       })
       .populate("items");
@@ -131,5 +132,24 @@ export async function getItemByCity(req, res) {
     return res.status(200).json(items);
   } catch (error) {
     return res.status(500).json({ message: `Get item by city : ${error}` });
+  }
+}
+
+// getting itmes by shop
+export async function getItemsByShop(req, res) {
+  try {
+    const { shopId } = req.params;
+    const shop = await shopModel.findById(shopId).populate("items");
+    if (!shop) {
+      return res.status(400).json({ message: `Shop not found.` });
+    }
+    return res.status(200).json({
+      shop,
+      items: shop.items,
+    });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: `Get item by shop error : ${error}` });
   }
 }
