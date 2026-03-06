@@ -186,3 +186,35 @@ export async function searchItems(req, res) {
       .json({ message: `error during searcing items error : ${error}` });
   }
 }
+
+export async function rating(req, res) {
+  try {
+    const { itemId, rating } = req.body;
+    if (!itemId || !rating) {
+      return res.status(400).json({ message: `Item Id or rating is required` });
+    }
+
+    if (rating < 1 || rating > 5) {
+      return res
+        .status(400)
+        .json({ message: `Rating must be in between 1 to 5` });
+    }
+
+    const item = await itemModel.findById(itemId);
+    if (!item) {
+      return res.status(400).json({ message: `Item not found.` });
+    }
+
+    const newCount = item.rating.count + 1;
+    const newAvrage =
+      (item.rating.average * item.rating.count + rating) / newCount;
+
+    item.rating.count = newCount;
+    item.rating.average = newAvrage;
+    await item.save();
+
+    return res.status(200).json({ rating: item.rating });
+  } catch (error) {
+    return res.status(500).json({ message: `Rating Error : ${error}` });
+  }
+}

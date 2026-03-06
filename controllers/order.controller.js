@@ -7,9 +7,9 @@ import RazorPay from "razorpay";
 import dotenv from "dotenv";
 dotenv.config();
 
-let instance = new RazorPay({
+export const instance = new RazorPay({
   key_id: process.env.RAZORPAY_API_ID,
-  key_secret: process.env.RAZORPAY_API_SECRET,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
 export async function placeOrder(req, res) {
@@ -62,7 +62,7 @@ export async function placeOrder(req, res) {
     );
 
     if (paymentMethod == "online") {
-      const razorOrder = instance.orders.create({
+      const razorOrder = await instance.orders.create({
         amount: Math.round(totalAmount * 100),
         currency: "INR",
         receipt: `receipt_${Date.now()}`,
@@ -81,7 +81,6 @@ export async function placeOrder(req, res) {
       return res.status(200).json({
         razorOrder,
         orderId: newOrder._id,
-        key_id: process.env.RAZORPAY_API_ID,
       });
     }
 
@@ -98,10 +97,34 @@ export async function placeOrder(req, res) {
       "name image price",
     );
     await newOrder.populate("shopOrders.shop", "name");
+    await newOrder.populate("shopOrders.owner", "name socketId");
+    await newOrder.populate("user", "name email mobile");
+
+    const io = req.app.get("io");
+
+    if (io) {
+      newOrder.shopOrders.forEach((shopOrder) => {
+        const ownerSocketId = shopOrder.owner.socketId;
+        if (ownerSocketId) {
+          io.to(ownerSocketId).emit("newOrder", {
+            _id: newOrder._id,
+            paymentMethod: newOrder.paymentMethod,
+            user: newOrder.user,
+            shopOrders: shopOrder,
+            createdAt: newOrder.createdAt,
+            deliveryAddress: newOrder.deliveryAddress,
+            payment: newOrder.payment,
+          });
+        }
+      });
+    }
 
     return res.status(200).json(newOrder);
   } catch (error) {
-    return res.status(500).json({ message: `Place order error : ${error}` });
+    console.log(error);
+    return res
+      .status(500)
+      .json({ message: `Place order error : ${error.message}` });
   }
 }
 
@@ -119,8 +142,30 @@ export async function verifyPayment(req, res) {
     order.payment = true;
     order.razorpayPaymentId = razorpay_payment_id;
     await order.save();
+
     await order.populate("shopOrders.shopOrderItems.item", "name image price");
     await order.populate("shopOrders.shop", "name");
+    await order.populate("shopOrders.owner", "name socketId");
+    await order.populate("user", "name email mobile");
+
+    const io = req.app.get("io");
+
+    if (io) {
+      order.shopOrders.forEach((shopOrder) => {
+        const ownerSocketId = shopOrder.owner.socketId;
+        if (ownerSocketId) {
+          io.to(ownerSocketId).emit("newOrder", {
+            _id: order._id,
+            paymentMethod: order.paymentMethod,
+            user: order.user,
+            shopOrders: shopOrder,
+            createdAt: order.createdAt,
+            deliveryAddress: order.deliveryAddress,
+            payment: order.payment,
+          });
+        }
+      });
+    }
 
     return res.status(200).json(order);
   } catch (error) {
@@ -158,6 +203,7 @@ export async function getMyOrders(req, res) {
         ),
         createdAt: order.createdAt,
         deliveryAddress: order.deliveryAddress,
+        payment: order.payment,
       }));
 
       return res.status(200).json(filteredOrders);
@@ -238,6 +284,33 @@ export async function updateOrderStatus(req, res) {
         latitude: b.location.coordinates?.[1],
         mobile: b.mobile,
       }));
+
+      await deliveryAssignment.populate("order");
+      await deliveryAssignment.populate("shop");
+
+      const io = req.app.get("io");
+
+      if (io) {
+        availableBoys.forEach((boy) => {
+          const boySocketId = boy.socketId;
+          if (boySocketId) {
+            io.to(boySocketId).emit("newAssignment", {
+              sentTo: boy._id,
+              assignmentId: deliveryAssignment._id,
+              orderId: deliveryAssignment.order._id,
+              shopName: deliveryAssignment.shop.name,
+              deliveryAddress: deliveryAssignment.order.deliveryAddress,
+              items:
+                deliveryAssignment.order.shopOrders.find((so) =>
+                  so._id.equals(deliveryAssignment.shopOrderId),
+                ).shopOrderItems || [],
+              subtotal: deliveryAssignment.order.shopOrders.find((so) =>
+                so._id.equals(deliveryAssignment.shopOrderId),
+              )?.subtotal,
+            });
+          }
+        });
+      }
     }
 
     await order.save();
@@ -248,6 +321,21 @@ export async function updateOrderStatus(req, res) {
       "shopOrders.assignedDeliveryBoy",
       "fullName email mobile",
     );
+    await order.populate("user", "socketId");
+
+    const io = req.app.get("io");
+
+    if (io) {
+      const userSocketId = order.user.socketId;
+      if (userSocketId) {
+        io.to(userSocketId).emit("update-status", {
+          orderId: order._id,
+          shopId: updatedShopOrder.shop._id,
+          status: updatedShopOrder.status,
+          userId: order.user._id,
+        });
+      }
+    }
 
     return res.status(200).json({
       shopOrder: updatedShopOrder,
@@ -472,5 +560,53 @@ export async function verifyDeliveryOtp(req, res) {
     return res
       .status(500)
       .json({ message: `Verify delivery otp error : ${error}` });
+  }
+}
+
+export async function getTodayDeliveries(req, res) {
+  try {
+    const deliveryBoyId = req.userId;
+    const startsOfDay = new Date();
+    startsOfDay.setHours(0, 0, 0, 0);
+
+    const orders = await orderModel
+      .find({
+        "shopOrders.assignedDeliveryBoy": deliveryBoyId,
+        "shopOrders.status": "delivered",
+        "shopOrders.deliveredAt": { $gte: startsOfDay },
+      })
+      .lean();
+
+    let todaysDeliveries = [];
+    orders.forEach((order) => {
+      order.shopOrders.forEach((shopOrder) => {
+        if (
+          shopOrder.assignedDeliveryBoy == deliveryBoyId &&
+          shopOrder.status == "delivered" &&
+          shopOrder.deliveredAt &&
+          shopOrder.deliveredAt >= startsOfDay
+        ) {
+          todaysDeliveries.push(shopOrder);
+        }
+      });
+    });
+
+    let stats = {};
+
+    todaysDeliveries.forEach((shopOrder) => {
+      const hour = new Date(shopOrder.deliveredAt).getHours();
+      stats[hour] = (stats[hour] || 0) + 1;
+    });
+
+    let formattedStats = Object.keys(stats).map((hour) => ({
+      hour: parseInt(hour),
+      count: stats[hour],
+    }));
+
+    formattedStats.sort((a, b) => a.hour - b.hour);
+
+    return res.status(200).json(formattedStats);
+  } catch (error) {
+    return res.status(500).json({ message: `Today delivery Error : ${error}` });
   }
 }
